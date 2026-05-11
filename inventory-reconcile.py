@@ -330,7 +330,6 @@ def reconcile() -> dict:
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            # Hosts: reactivate if returned again
             if seen_host_ids:
                 cur.execute(
                     """
@@ -395,11 +394,9 @@ def reconcile() -> dict:
                     details="Zabbix returned 0 hosts, cleanup skipped",
                 )
 
-            # Host IPs: delete if no longer present in Zabbix
             if seen_host_ids:
                 cur.execute("SELECT host_id, host(ip) FROM public.host_ip")
                 db_host_ips = {(int(row[0]), normalize_text(row[1])) for row in cur.fetchall()}
-
                 stale_host_ips = db_host_ips - seen_host_ips
 
                 for host_id, ip in sorted(stale_host_ips):
@@ -426,7 +423,6 @@ def reconcile() -> dict:
                     details="Zabbix returned 0 hosts, IP cleanup skipped",
                 )
 
-            # Users: reactivate if returned again
             if seen_user_ids:
                 cur.execute(
                     """
@@ -491,7 +487,6 @@ def reconcile() -> dict:
                     details="Keycloak returned 0 users, cleanup skipped",
                 )
 
-            # Groups: reactivate if returned again
             if seen_group_ids:
                 cur.execute(
                     """
