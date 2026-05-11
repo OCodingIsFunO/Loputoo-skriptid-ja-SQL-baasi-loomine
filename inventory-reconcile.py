@@ -63,7 +63,10 @@ _token_cache: Dict[str, Any] = {"access_token": None, "expires_at": 0}
 
 def log_event(*, source: str, action: str, entity: str, details: str) -> None:
     ts = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-    logging.info(f'{ts} source={source} action={action} entity={entity} details="{details.replace(chr(34), chr(39))}"')
+    logging.info(
+        f'{ts} source={source} action={action} entity={entity} '
+        f'details="{details.replace(chr(34), chr(39))}"'
+    )
 
 
 def log_summary(
@@ -73,9 +76,12 @@ def log_summary(
     zabbix_ips_seen: int,
     keycloak_users_seen: int,
     keycloak_groups_seen: int,
+    hosts_reactivated: int,
     hosts_deactivated: int,
     ips_deleted: int,
+    users_reactivated: int,
     users_deactivated: int,
+    groups_reactivated: int,
     groups_deactivated: int,
     error: str | None = None,
 ) -> None:
@@ -89,9 +95,12 @@ def log_summary(
         f"zabbix_ips_seen={zabbix_ips_seen}",
         f"keycloak_users_seen={keycloak_users_seen}",
         f"keycloak_groups_seen={keycloak_groups_seen}",
+        f"hosts_reactivated={hosts_reactivated}",
         f"hosts_deactivated={hosts_deactivated}",
         f"ips_deleted={ips_deleted}",
+        f"users_reactivated={users_reactivated}",
         f"users_deactivated={users_deactivated}",
+        f"groups_reactivated={groups_reactivated}",
         f"groups_deactivated={groups_deactivated}",
     ]
     if error:
@@ -310,16 +319,47 @@ def reconcile() -> dict:
         "zabbix_ips_seen": len(seen_host_ips),
         "keycloak_users_seen": len(seen_user_ids),
         "keycloak_groups_seen": len(seen_group_ids),
+        "hosts_reactivated": 0,
         "hosts_deactivated": 0,
         "ips_deleted": 0,
+        "users_reactivated": 0,
         "users_deactivated": 0,
+        "groups_reactivated": 0,
         "groups_deactivated": 0,
     }
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            # Hosts: deactivate if not in Zabbix anymore
+            # Hosts: reactivate if returned again
             if seen_host_ids:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM public.host
+                    WHERE active = FALSE
+                      AND id = ANY(%s)
+                    """,
+                    (list(seen_host_ids),),
+                )
+                reactivated_host_ids = [row[0] for row in cur.fetchall()]
+
+                for host_id in reactivated_host_ids:
+                    cur.execute(
+                        """
+                        UPDATE public.host
+                        SET active = TRUE, updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (host_id,),
+                    )
+                    stats["hosts_reactivated"] += 1
+                    log_event(
+                        source="zabbix",
+                        action="reactivate",
+                        entity="host",
+                        details=f"id={host_id}",
+                    )
+
                 cur.execute(
                     """
                     SELECT id
@@ -386,8 +426,36 @@ def reconcile() -> dict:
                     details="Zabbix returned 0 hosts, IP cleanup skipped",
                 )
 
-            # Users: deactivate if not in Keycloak anymore
+            # Users: reactivate if returned again
             if seen_user_ids:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM public.sso_user
+                    WHERE active = FALSE
+                      AND id = ANY(%s)
+                    """,
+                    (list(seen_user_ids),),
+                )
+                reactivated_user_ids = [row[0] for row in cur.fetchall()]
+
+                for user_id in reactivated_user_ids:
+                    cur.execute(
+                        """
+                        UPDATE public.sso_user
+                        SET active = TRUE, updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (user_id,),
+                    )
+                    stats["users_reactivated"] += 1
+                    log_event(
+                        source="keycloak",
+                        action="reactivate",
+                        entity="sso_user",
+                        details=f"id={user_id}",
+                    )
+
                 cur.execute(
                     """
                     SELECT id
@@ -423,8 +491,36 @@ def reconcile() -> dict:
                     details="Keycloak returned 0 users, cleanup skipped",
                 )
 
-            # Groups: deactivate if not in Keycloak anymore
+            # Groups: reactivate if returned again
             if seen_group_ids:
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM public.sso_group
+                    WHERE active = FALSE
+                      AND id = ANY(%s)
+                    """,
+                    (list(seen_group_ids),),
+                )
+                reactivated_group_ids = [row[0] for row in cur.fetchall()]
+
+                for group_id in reactivated_group_ids:
+                    cur.execute(
+                        """
+                        UPDATE public.sso_group
+                        SET active = TRUE, updated_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (group_id,),
+                    )
+                    stats["groups_reactivated"] += 1
+                    log_event(
+                        source="keycloak",
+                        action="reactivate",
+                        entity="sso_group",
+                        details=f"id={group_id}",
+                    )
+
                 cur.execute(
                     """
                     SELECT id
@@ -475,9 +571,12 @@ def main() -> int:
             f"zabbix_ips_seen={stats['zabbix_ips_seen']} "
             f"keycloak_users_seen={stats['keycloak_users_seen']} "
             f"keycloak_groups_seen={stats['keycloak_groups_seen']} "
+            f"hosts_reactivated={stats['hosts_reactivated']} "
             f"hosts_deactivated={stats['hosts_deactivated']} "
             f"ips_deleted={stats['ips_deleted']} "
+            f"users_reactivated={stats['users_reactivated']} "
             f"users_deactivated={stats['users_deactivated']} "
+            f"groups_reactivated={stats['groups_reactivated']} "
             f"groups_deactivated={stats['groups_deactivated']}"
         )
         return 0
@@ -488,9 +587,12 @@ def main() -> int:
             zabbix_ips_seen=0,
             keycloak_users_seen=0,
             keycloak_groups_seen=0,
+            hosts_reactivated=0,
             hosts_deactivated=0,
             ips_deleted=0,
+            users_reactivated=0,
             users_deactivated=0,
+            groups_reactivated=0,
             groups_deactivated=0,
             error=str(exc),
         )
@@ -503,9 +605,12 @@ def main() -> int:
             zabbix_ips_seen=0,
             keycloak_users_seen=0,
             keycloak_groups_seen=0,
+            hosts_reactivated=0,
             hosts_deactivated=0,
             ips_deleted=0,
+            users_reactivated=0,
             users_deactivated=0,
+            groups_reactivated=0,
             groups_deactivated=0,
             error=f"Missing required environment variable: {exc}",
         )
@@ -518,9 +623,12 @@ def main() -> int:
             zabbix_ips_seen=0,
             keycloak_users_seen=0,
             keycloak_groups_seen=0,
+            hosts_reactivated=0,
             hosts_deactivated=0,
             ips_deleted=0,
+            users_reactivated=0,
             users_deactivated=0,
+            groups_reactivated=0,
             groups_deactivated=0,
             error=str(exc),
         )
