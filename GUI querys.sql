@@ -39,11 +39,11 @@ SET
     description = EXCLUDED.description,
     updated_at = NOW();
 
-
 OverrideServiceDelete
 DELETE FROM public.override_service
 WHERE host_id = {{ detail_service.updatedRow.host_id }}
   AND original_service_id = {{ detail_service.updatedRow.original_service_id }};
+
 RowAccessGroup
 SELECT
     g.id,
@@ -52,7 +52,9 @@ SELECT
 FROM public.group_host_access gha
 JOIN public.sso_group g
     ON g.id = gha.group_id
-WHERE gha.host_id = {{ appsmith.store.selectedHostId }};
+WHERE gha.host_id = {{ appsmith.store.selectedHostId }}
+  AND g.active = TRUE
+ORDER BY g.name;
 
 RowHost
 SELECT
@@ -61,14 +63,16 @@ SELECT
     h.host AS technical_host,
     h.environment
 FROM public.host h
-WHERE h.id = {{hosts.triggeredRow.id}};
+WHERE h.id = {{ hosts.triggeredRow.id }}
+  AND h.active = TRUE;
 
 RowIP
 SELECT
     hip.id,
     hip.ip
 FROM public.host_ip hip
-WHERE hip.host_id = {{hosts.triggeredRow.id}}
+WHERE hip.host_id = {{ hosts.triggeredRow.id }}
+  AND hip.active = TRUE
 ORDER BY hip.ip;
 
 RowService
@@ -84,6 +88,7 @@ SELECT
 FROM public.host_service_view
 WHERE host_id = {{ hosts.triggeredRow.id }}
 ORDER BY service_name;
+
 UserAddedServiceDelete
 DELETE FROM public.user_added_service
 WHERE id = {{ detail_service.updatedRow.user_added_service_id }};
@@ -115,7 +120,7 @@ SELECT
     h.id,
     h.name,
     h.host AS technical_host,
-    h.ip,
+    COALESCE(string_agg(DISTINCT hip.ip::text, E'\n' ORDER BY hip.ip::text), '') AS ips,
     h.environment,
     COALESCE(
         string_agg(DISTINCT hsv.service_name, E'\n' ORDER BY hsv.service_name)
@@ -124,14 +129,19 @@ SELECT
     ) AS services,
     COALESCE(string_agg(DISTINCT g.name, E'\n' ORDER BY g.name), '') AS groups_with_access
 FROM public.host h
+LEFT JOIN public.host_ip hip
+    ON hip.host_id = h.id
+   AND hip.active = TRUE
 LEFT JOIN public.host_service_view hsv
     ON hsv.host_id = h.id
 LEFT JOIN public.group_host_access gha
     ON gha.host_id = h.id
 LEFT JOIN public.sso_group g
     ON g.id = gha.group_id
+   AND g.active = TRUE
+WHERE h.active = TRUE
 GROUP BY
-    h.id, h.name, h.host, h.ip, h.environment
+    h.id, h.name, h.host, h.environment
 ORDER BY
     h.name;
 
@@ -142,15 +152,18 @@ SELECT
     u.lastname,
     COALESCE(string_agg(DISTINCT g.name, ', ' ORDER BY g.name), '') AS groups,
     COALESCE(string_agg(DISTINCT h.name, ', ' ORDER BY h.name), '') AS accessible_hosts
-FROM sso_user u
-LEFT JOIN user_group ug
+FROM public.sso_user u
+LEFT JOIN public.user_group ug
     ON ug.user_id = u.id
-LEFT JOIN sso_group g
+LEFT JOIN public.sso_group g
     ON g.id = ug.group_id
-LEFT JOIN group_host_access gha
+   AND g.active = TRUE
+LEFT JOIN public.group_host_access gha
     ON gha.group_id = g.id
-LEFT JOIN host h
+LEFT JOIN public.host h
     ON h.id = gha.host_id
+   AND h.active = TRUE
+WHERE u.active = TRUE
 GROUP BY
     u.id, u.username, u.firstname, u.lastname
 ORDER BY
