@@ -4,6 +4,7 @@ CREATE TABLE public.host (
     host        text NOT NULL,
     environment text NOT NULL DEFAULT 'unknown',
     updated_at  timestamp with time zone NOT NULL DEFAULT now(),
+    active     BOOLEAN NOT NULL DEFAULT TRUE,
     CONSTRAINT host_pkey PRIMARY KEY (id));
 CREATE TABLE public.service (
     id          bigserial NOT NULL,
@@ -18,6 +19,7 @@ CREATE TABLE public.sso_group (
     name        text NOT NULL,
     description text,
     updated_at  timestamp with time zone NOT NULL DEFAULT now(),
+    active     BOOLEAN NOT NULL DEFAULT TRUE,
     CONSTRAINT sso_group_pkey PRIMARY KEY (id),
     CONSTRAINT sso_group_name_key UNIQUE (name));
 CREATE TABLE public.sso_user (
@@ -26,6 +28,7 @@ CREATE TABLE public.sso_user (
     firstname  text NOT NULL,
     lastname   text NOT NULL,
     updated_at timestamp with time zone NOT NULL DEFAULT now(),
+    active     BOOLEAN NOT NULL DEFAULT TRUE,
     CONSTRAINT sso_user_pkey PRIMARY KEY (id),
     CONSTRAINT sso_user_username_key UNIQUE (username));
 CREATE TABLE public.group_host_access (
