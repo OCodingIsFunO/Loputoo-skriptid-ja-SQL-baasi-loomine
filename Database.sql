@@ -2,7 +2,6 @@ CREATE TABLE public.host (
     id          bigint NOT NULL,
     name        text NOT NULL,
     host        text NOT NULL,
-    ip          inet NOT NULL,
     environment text NOT NULL DEFAULT 'unknown',
     updated_at  timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT host_pkey PRIMARY KEY (id));
